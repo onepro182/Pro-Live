@@ -35,14 +35,16 @@ button:hover{background:#005fcc;}
 <div class="controls">
 <label for="league">Ligue :</label>
 <select id="league">
-    <option value="all" selected>🌍 Toutes les ligues</option>
-    <option value="39">Premier League (Angleterre)</option>
-    <option value="61">Ligue 1 (France)</option>
-    <option value="140">La Liga (Espagne)</option>
-    <option value="135">Serie A (Italie)</option>
-    <option value="78">Bundesliga (Allemagne)</option>
-    <option value="2">UEFA Champions League</option>
-    <option value="195">Europa Conference League</option>
+<option value="all" selected>🌍 Toutes les ligues</option>
+<option value="39">Premier League (Angleterre)</option>
+<option value="61">Ligue 1 (France)</option>
+<option value="140">La Liga (Espagne)</option>
+<option value="135">Serie A (Italie)</option>
+<option value="78">Bundesliga (Allemagne)</option>
+<option value="2">UEFA Champions League</option>
+<option value="3">Europa League</option>
+<option value="4">Europa Conference League</option>
+<option value="5">Ecureu Cup</option>
 </select>
 
 <label for="date">Date :</label>
@@ -57,14 +59,14 @@ button:hover{background:#005fcc;}
 <audio id="goalSound" src="https://www.soundjay.com/notification/sounds/goal-1.mp3" preload="auto"></audio>
 
 <script>
-const API_KEY="637d4720156cd4c3ed34d17adcd4154e"; // Ta clé API
+const API_KEY="637d4720156cd4c3ed34d17adcd4154e"; // ← Remplace par ta clé API Football
 const SEASON=2024;
 const REFRESH_INTERVAL=30000;
 let matchElements={};
 let previousScores={};
 let previousEvents={};
 
-// Demande la permission de notification
+// Notifications
 if ("Notification" in window && Notification.permission !== "granted") {
     Notification.requestPermission();
 }
@@ -144,7 +146,6 @@ function renderOrUpdateMatch(container, fix, leagueKey){
             document.getElementById("goalSound").play();
             showNotification("But !", `${home} ${homeScore} - ${awayScore} ${away}`);
         }
-
         div.querySelector(".time").textContent=`${time} • ${statusText}`;
         div.querySelector(".progress-bar").style.width=progress+"%";
 
@@ -161,7 +162,6 @@ function renderOrUpdateMatch(container, fix, leagueKey){
         }
         if(eventsContainer) eventsContainer.innerHTML=eventsHtml;
         previousEvents[id]=prevEv;
-
     } else {
         div=document.createElement("div");
         div.className="match";
