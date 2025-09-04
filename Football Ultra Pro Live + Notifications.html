@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Football Ultra Pro Live + Notifications</title>
+<style>
+body{font-family:sans-serif; padding:20px; max-width:1000px; margin:auto; background:#f5f5f5;}
+h1{text-align:center; margin-bottom:20px;}
+.controls{display:flex; gap:15px; flex-wrap:wrap; justify-content:center; margin-bottom:20px;}
+select,input,button{padding:6px 10px; font-size:1rem; border-radius:6px; border:1px solid #ccc;}
+button{cursor:pointer; border:none; background:#0077ff; color:#fff;}
+button:hover{background:#005fcc;}
+.league-block{margin-bottom:20px;}
+.league-title{font-weight:bold; font-size:1.2rem; margin-bottom:5px; border-bottom:1px solid #ccc; padding-bottom:3px;}
+.match{display:flex; flex-direction:column; background:#fff; padding:10px; border-radius:8px; margin:6px 0; box-shadow:0 1px 3px rgba(0,0,0,0.1); transition:background 0.3s;}
+.match-pop{background: #fff4e5;}
+.match-row{display:flex; justify-content:space-between; align-items:center;}
+.teams{display:flex; align-items:center; gap:10px; font-weight:bold;}
+.team-logo{width:30px; height:30px; object-fit:contain;}
+.score{font-weight:bold; margin:0 10px; font-size:1.2rem; transition: transform 0.3s ease, color 0.3s ease;}
+.score.live{color:red;}
+.score.ns{color:gray;}
+.score.ft{color:green;}
+.score.pop{transform: scale(1.5); color:orange;}
+.time{font-size:0.9rem; color:#444;}
+.progress-container{height:5px; background:#ddd; border-radius:2px; margin-top:5px; width:100%;}
+.progress-bar{height:5px; background:#0077ff; border-radius:2px; transition:width 0.5s linear;}
+.events{font-size:0.85rem; color:#222; margin-top:3px;}
+.note{text-align:center; margin-top:10px; font-size:0.9rem; color:#666;}
+</style>
+</head>
+<body>
+<h1>Football Ultra Pro Live + Notifications</h1>
+
+<div class="controls">
+<label for="league">Ligue :</label>
+<select id="league">
+    <option value="all" selected>🌍 Toutes les ligues</option>
+    <option value="39">Premier League (Angleterre)</option>
+    <option value="61">Ligue 1 (France)</option>
+    <option value="140">La Liga (Espagne)</option>
+    <option value="135">Serie A (Italie)</option>
+    <option value="78">Bundesliga (Allemagne)</option>
+    <option value="2">UEFA Champions League</option>
+    <option value="195">Europa Conference League</option>
+</select>
+
+<label for="date">Date :</label>
+<input type="date" id="date">
+
+<button id="refresh">🔄 Rafraîchir maintenant</button>
+</div>
+
+<div id="matches"></div>
+<div class="note">⏱️ Mise à jour automatique toutes les 30 secondes</div>
+
+<audio id="goalSound" src="https://www.soundjay.com/notification/sounds/goal-1.mp3" preload="auto"></audio>
+
+<script>
+const API_KEY="637d4720156cd4c3ed34d17adcd4154e"; // Ta clé API
+const SEASON=2024;
+const REFRESH_INTERVAL=30000;
+let matchElements={};
+let previousScores={};
+let previousEvents={};
+
+// Demande la permission de notification
+if ("Notification" in window && Notification.permission !== "granted") {
+    Notification.requestPermission();
+}
+
+async function fetchMatches(date, leagueId){
+    let url=`https://v3.football.api-sports.io/fixtures?date=${date}&season=${SEASON}`;
+    if(leagueId!=="all") url+=`&league=${leagueId}`;
+    const res=await fetch(url,{headers:{"x-apisports-key":API_KEY}});
+    if(!res.ok) throw new Error("Erreur API: "+res.status);
+    return res.json();
+}
+
+function showNotification(title, text){
+    if(Notification.permission==="granted"){
+        new Notification(title,{body:text, icon:"https://upload.wikimedia.org/wikipedia/commons/8/80/Football-icon.png"});
+    }
+}
+
+function renderMatches(container, fixtures, leagueId){
+    if(fixtures.length===0){ container.innerHTML="<div>Aucun match</div>"; return; }
+    if(Object.keys(matchElements).length===0) container.innerHTML="";
+
+    if(leagueId==="all"){
+        const grouped={};
+        fixtures.forEach(fix=>{
+            const key=fix.league.name+" ("+fix.league.country+")";
+            if(!grouped[key]) grouped[key]=[];
+            grouped[key].push(fix);
+        });
+        Object.keys(grouped).forEach(leagueName=>{
+            let block=document.getElementById("block-"+leagueName) || document.createElement("div");
+            block.className="league-block";
+            block.id="block-"+leagueName;
+            if(!matchElements[leagueName]) block.innerHTML=`<div class="league-title">${leagueName}</div>`;
+            grouped[leagueName].forEach(fix=>renderOrUpdateMatch(block, fix, leagueName));
+            container.appendChild(block);
+        });
+    } else {
+        fixtures.forEach(fix=>renderOrUpdateMatch(container, fix, "single"));
+    }
+}
+
+function renderOrUpdateMatch(container, fix, leagueKey){
+    const id="match-"+fix.fixture.id;
+    let div=matchElements[id];
+    const home=fix.teams.home.name;
+    const away=fix.teams.away.name;
+    const homeLogo=fix.teams.home.logo;
+    const awayLogo=fix.teams.away.logo;
+    const homeScore=fix.goals.home!==null?fix.goals.home:0;
+    const awayScore=fix.goals.away!==null?fix.goals.away:0;
+    const time=new Date(fix.fixture.date).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+
+    let statusText="", scoreClass="", progress=0;
+    switch(fix.fixture.status.short){
+        case "NS": statusText="Pas commencé"; scoreClass="ns"; progress=0; break;
+        case "1H": statusText="1ère mi-temps "+fix.fixture.status.elapsed+"'"; scoreClass="live"; progress=fix.fixture.status.elapsed/45*50; break;
+        case "2H": statusText="2ème mi-temps "+fix.fixture.status.elapsed+"'"; scoreClass="live"; progress=50+fix.fixture.status.elapsed/45*50; break;
+        case "HT": statusText="Mi-temps"; scoreClass="live"; progress=50; break;
+        case "FT": statusText="Terminé"; scoreClass="ft"; progress=100; break;
+        case "P": statusText="Prolongation"; scoreClass="live"; progress=75; break;
+        case "AET": statusText="Terminé après prolongation"; scoreClass="ft"; progress=100; break;
+        case "LIVE": statusText="En direct "+fix.fixture.status.elapsed+"'"; scoreClass="live"; progress=fix.fixture.status.elapsed/90*100; break;
+        default: statusText=fix.fixture.status.long; scoreClass="ns"; progress=0;
+    }
+
+    const prevScore=previousScores[id];
+    const prevEv=previousEvents[id] || [];
+
+    if(div){
+        const scoreEl=div.querySelector(".score");
+        if(scoreEl.textContent!==`${homeScore} - ${awayScore}`){
+            scoreEl.textContent=`${homeScore} - ${awayScore}`;
+            scoreEl.className=`score ${scoreClass} pop`;
+            div.classList.add("match-pop");
+            setTimeout(()=>{scoreEl.className=`score ${scoreClass}`; div.classList.remove("match-pop");},500);
+            document.getElementById("goalSound").play();
+            showNotification("But !", `${home} ${homeScore} - ${awayScore} ${away}`);
+        }
+
+        div.querySelector(".time").textContent=`${time} • ${statusText}`;
+        div.querySelector(".progress-bar").style.width=progress+"%";
+
+        const eventsContainer=div.querySelector(".events");
+        let eventsHtml="";
+        if(fix.events && fix.events.length>0){
+            fix.events.forEach(ev=>{
+                if(!prevEv.includes(ev.id)){
+                    showNotification(`${ev.type} - ${ev.team.name}`, `${ev.detail || ''} à ${ev.time}'`);
+                    prevEv.push(ev.id);
+                }
+            });
+            eventsHtml=fix.events.map(ev=>`${ev.time}' ${ev.team.name} ${ev.type} ${ev.detail || ''}`).join("<br>");
+        }
+        if(eventsContainer) eventsContainer.innerHTML=eventsHtml;
+        previousEvents[id]=prevEv;
+
+    } else {
+        div=document.createElement("div");
+        div.className="match";
+        div.id=id;
+        let eventsHtml="";
+        if(fix.events && fix.events.length>0){
+            eventsHtml=fix.events.map(ev=>`${ev.time}' ${ev.team.name} ${ev.type} ${ev.detail || ''}`).join("<br>");
+            fix.events.forEach(ev=>{
+                showNotification(`${ev.type} - ${ev.team.name}`, `${ev.detail || ''} à ${ev.time}'`);
+            });
+        }
+        div.innerHTML=`
+            <div class="match-row">
+                <div class="teams">
+                    <img class="team-logo" src="${homeLogo}" alt="${home}"><span>${home}</span>
+                    <span class="score ${scoreClass}">${homeScore} - ${awayScore}</span>
+                    <span>${away}</span><img class="team-logo" src="${awayLogo}" alt="${away}">
+                </div>
+                <div class="time">${time} • ${statusText}</div>
+            </div>
+            <div class="progress-container"><div class="progress-bar" style="width:${progress}%"></div></div>
+            <div class="events">${eventsHtml}</div>
+        `;
+        matchElements[id]=div;
+        container.appendChild(div);
+        previousEvents[id]=fix.events?fix.events.map(ev=>ev.id):[];
+    }
+    previousScores[id]=`${homeScore} - ${awayScore}`;
+}
+
+async function loadMatches(){
+    const leagueId=document.getElementById("league").value;
+    const date=document.getElementById("date").value;
+    const container=document.getElementById("matches");
+    try{
+        const data=await fetchMatches(date, leagueId);
+        renderMatches(container, data.response, leagueId);
+    }catch(e){
+        container.innerHTML="<div>Erreur: "+e.message+"</div>";
+        console.error(e);
+    }
+}
+
+const leagueSelect=document.getElementById("league");
+const dateInput=document.getElementById("date");
+const refreshBtn=document.getElementById("refresh");
+dateInput.value=new Date().toISOString().slice(0,10);
+
+loadMatches();
+leagueSelect.addEventListener("change",()=>{matchElements={}; previousScores={}; previousEvents={}; loadMatches();});
+dateInput.addEventListener("change",()=>{matchElements={}; previousScores={}; previousEvents={}; loadMatches();});
+refreshBtn.addEventListener("click",()=>{matchElements={}; previousScores={}; previousEvents={}; loadMatches();});
+setInterval(loadMatches, REFRESH_INTERVAL);
+</script>
+</body>
+</html>
